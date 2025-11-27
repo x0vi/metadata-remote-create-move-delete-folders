@@ -185,17 +185,30 @@
          */
         async loadTree() {
             try {
-                // Set loading state
                 document.getElementById('folder-count').textContent = '(loading...)';
-                
                 const data = await API.loadTree();
                 State.treeData[''] = data.items;
-                this.buildTreeFromData();
-                this.updateSortUI(); // Initialize sort UI
+                
+                // Load children for all expanded folders to preserve expanded state
+                const expandedPaths = Array.from(State.expandedFolders);
+                for (const path of expandedPaths) {
+                    if (path && !State.treeData[path]) {
+                        try {
+                            const childData = await API.loadTreeChildren(path);
+                            State.treeData[path] = childData.items;
+                        } catch (err) {
+                            // If loading fails (e.g., folder was deleted), remove from expanded set
+                            State.expandedFolders.delete(path);
+                        }
+                    }
+                }
+                
+                this.rebuildTree();
+                this.updateSortUI();
+                document.getElementById('folder-count').textContent = `(${data.items.length})`;
             } catch (err) {
                 console.error('Error loading tree:', err);
                 UIUtils.showStatus('Error loading folders', 'error');
-                // Set error state
                 document.getElementById('folder-count').textContent = '(error)';
             }
         },
@@ -632,7 +645,6 @@
                 
                 // Clear current tree data and expanded folders to force full refresh
                 State.treeData = { '': [] };
-                State.expandedFolders.clear();
                 
                 // Reload from server
                 await this.loadTree();
@@ -730,7 +742,6 @@
                 
                 // Clear current tree data and expanded folders to force full refresh
                 State.treeData = { '': [] };
-                State.expandedFolders.clear();
                 
                 // Reload from server
                 await this.loadTree();
@@ -1358,7 +1369,6 @@
                 
                 // Clear current tree data and expanded folders to force full refresh
                 State.treeData = { '': [] };
-                State.expandedFolders.clear();
                 
                 // Reload from server
                 await this.loadTree();
@@ -1443,7 +1453,6 @@
                 
                 // Success - reload tree
                 State.treeData = { '': [] };
-                State.expandedFolders.clear();
                 await this.loadTree();
                 
                 UIUtils.showStatus('Folder created successfully', 'success');
@@ -1502,7 +1511,6 @@
                 State.currentFile = null;
                 State.currentFiles = [];
                 State.treeData = { '': [] };
-                State.expandedFolders.clear();
                 
                 // Clear file list UI
                 const fileList = document.getElementById('file-list');
