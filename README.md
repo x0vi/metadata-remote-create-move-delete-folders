@@ -206,7 +206,7 @@ docker run -d \
 | `PUID` | 1000 | User ID for file permissions |
 | `PGID` | 1000 | Group ID for file permissions |
 | `MUSIC_DIR` | /music | Internal container music path |
-
+| `HOST` | 0.0.0.0 | Host address to bind to` |
 ### Port Configuration
 
 - `8338` - Web interface (configurable in docker-compose.yml)

@@ -20,7 +20,7 @@ Gunicorn configuration for Metadata Remote production deployment
 import os
 
 # Server socket
-bind = f"0.0.0.0:{os.environ.get('PORT', '8338')}"
+bind = f"{os.environ.get('HOST', '0.0.0.0')}:{os.environ.get('PORT', '8338')}"
 backlog = 2048
 
 # Worker processes
