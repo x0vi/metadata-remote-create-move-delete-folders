@@ -48,6 +48,12 @@
             <div class="pane-header">
                 <span>Folders <span class="file-count" id="folder-count">(0)</span></span>
                 <div class="icon-controls">
+                    <button class="control-icon create-folder-btn" id="create-folder-btn" title="Create new folder" tabindex="0">
+                        ➕
+                    </button>
+                    <button class="control-icon delete-folder-btn" id="delete-folder-btn" title="Delete selected folder" tabindex="0">
+                        🗑️
+                    </button>
                     <button class="control-icon" id="folders-filter-btn" title="Filter folders (/)" tabindex="0">
                         🔍
                     </button>
@@ -370,6 +376,10 @@
                             <span class="help-description">Rename folder</span>
                             <span class="help-keys"><span class="help-key">Enter</span><span class="help-key">Enter</span></span>
                         </div>
+                        <div class="help-shortcut-item">
+                            <span class="help-description">Move folder</span>
+                            <span class="help-keys"><span class="help-key">Ctrl</span><span class="help-key-plus">+</span><span class="help-key">Shift</span><span class="help-key-plus">+</span><span class="help-key">M</span></span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -417,6 +427,34 @@
             <button class="field-edit-btn field-edit-cancel" id="field-edit-cancel" aria-label="Cancel and close">
                 Cancel
             </button>
+        </div>
+    </div>
+    
+    <!-- Move Folder Modal -->
+    <div class="move-folder-overlay" id="move-folder-overlay"></div>
+    <div class="move-folder-modal" id="move-folder-modal">
+        <div class="move-folder-header">
+            <h3>Move Folder</h3>
+            <button class="move-folder-close" id="move-folder-close-btn" onclick="window.MetadataRemote.Navigation.Tree.closeFolderMoveModal()">✕</button>
+        </div>
+        <div class="move-folder-content">
+            <div class="move-folder-source">
+                <span class="move-folder-label">Moving:</span>
+                <span class="move-folder-source-name" id="move-folder-source-name"></span>
+            </div>
+            <div class="move-folder-destination-label">
+                Select destination folder:
+            </div>
+            <div class="move-folder-tree" id="move-folder-tree">
+                <!-- Folder tree will be populated here -->
+            </div>
+        </div>
+        <div class="move-folder-actions">
+            <button class="move-folder-btn move-folder-confirm btn-status" id="move-folder-confirm-btn" disabled onclick="window.MetadataRemote.Navigation.Tree.executeFolderMove()">
+                <span class="btn-status-content">Move</span>
+                <span class="btn-status-message"></span>
+            </button>
+            <button class="move-folder-btn move-folder-cancel" onclick="window.MetadataRemote.Navigation.Tree.closeFolderMoveModal()">Cancel</button>
         </div>
     </div>
   

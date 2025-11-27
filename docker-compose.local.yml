@@ -7,7 +7,7 @@ services:
     ports:
       - "8338:8338"
     volumes:
-      - /PATH/TO/YOUR/MUSIC:/music  # Change this to your music directory
+      - /home/xovi/Musique:/music  # Change this to your music directory
     environment:
       - PUID=1000
       - PGID=1000

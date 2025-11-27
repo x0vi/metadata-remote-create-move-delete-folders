@@ -35,6 +35,9 @@
     let selectTreeItemCallback = null;
     let loadFilesCallback = null;
     
+    // Drag and drop state
+    let draggingFolder = null;
+    
     window.MetadataRemote.Navigation.Tree = {
         /**
          * Initialize the tree module with required callbacks
@@ -47,6 +50,12 @@
             
             // Set up the new folder controls
             this.setupFolderControls();
+            
+            // Set up folder button handlers
+            this.setupFolderButtonHandlers();
+            
+            // Initialize drag and drop functionality
+            this.initDragAndDrop();
         },
         
         /**
@@ -139,6 +148,22 @@
                     }
                 }
             });
+        },
+        
+        /**
+         * Wire up create and delete folder buttons
+         */
+        setupFolderButtonHandlers() {
+            const createBtn = document.getElementById('create-folder-btn');
+            const deleteBtn = document.getElementById('delete-folder-btn');
+            
+            if (createBtn) {
+                createBtn.onclick = () => this.showCreateFolderDialog();
+            }
+            
+            if (deleteBtn) {
+                deleteBtn.onclick = () => this.showDeleteFolderDialog();
+            }
         },
         
         /**
@@ -278,6 +303,7 @@
             const div = document.createElement('div');
             div.className = 'tree-item';
             div.dataset.path = item.path;
+            div.draggable = true;
             
             const content = document.createElement('div');
             content.className = 'tree-item-content';
@@ -436,6 +462,343 @@
             sortDropdown.querySelectorAll('.sort-option').forEach(option => {
                 option.classList.toggle('active', option.dataset.sort === State.foldersSort.method);
             });
+        },
+        
+        /**
+         * Initialize drag and drop event handlers
+         */
+        initDragAndDrop() {
+            const tree = document.getElementById('folder-tree');
+            if (!tree) return;
+            
+            // Use event delegation on the tree container
+            tree.addEventListener('dragstart', this.handleDragStart.bind(this));
+            tree.addEventListener('dragover', this.handleDragOver.bind(this));
+            tree.addEventListener('dragenter', this.handleDragEnter.bind(this));
+            tree.addEventListener('dragleave', this.handleDragLeave.bind(this));
+            tree.addEventListener('drop', this.handleDrop.bind(this));
+            tree.addEventListener('dragend', this.handleDragEnd.bind(this));
+            
+            // Add handlers for blank area (root) drop zone
+            const scrollArea = document.querySelector('.folders-scroll-area');
+            if (scrollArea) {
+                scrollArea.addEventListener('dragover', this.handleBlankAreaDragOver.bind(this));
+                scrollArea.addEventListener('dragleave', this.handleBlankAreaDragLeave.bind(this));
+                scrollArea.addEventListener('drop', this.handleBlankAreaDrop.bind(this));
+                
+                // Add click handler to deselect folders when clicking blank area
+                scrollArea.addEventListener('click', (e) => {
+                    // Check if click was on blank area (not on a tree item)
+                    if (e.target === scrollArea || e.target.classList.contains('folders-scroll-area')) {
+                        // Deselect current folder
+                        if (State.selectedTreeItem) {
+                            State.selectedTreeItem.classList.remove('selected');
+                            State.selectedTreeItem = null;
+                            State.currentPath = '';
+                        }
+                    }
+                });
+            }
+        },
+        
+        /**
+         * Handle drag start event
+         * @param {DragEvent} e - Drag event
+         */
+        handleDragStart(e) {
+            // Only handle drag on tree items
+            const treeItem = e.target.closest('.tree-item');
+            if (!treeItem) return;
+            
+            const folderPath = treeItem.dataset.path;
+            draggingFolder = folderPath;
+            
+            // Add dragging class for visual feedback
+            treeItem.classList.add('dragging');
+            
+            // Set drag data
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', folderPath);
+        },
+        
+        /**
+         * Handle drag over event
+         * @param {DragEvent} e - Drag event
+         */
+        handleDragOver(e) {
+            if (!draggingFolder) return;
+            
+            const treeItem = e.target.closest('.tree-item');
+            if (!treeItem) return;
+            
+            const targetPath = treeItem.dataset.path;
+            
+            // Validate if this is a valid drop target
+            if (this.isValidDropTarget(draggingFolder, targetPath)) {
+                e.preventDefault(); // Allow drop
+                e.dataTransfer.dropEffect = 'move';
+            }
+        },
+        
+        /**
+         * Handle drag over event on blank area (for root drop)
+         * @param {DragEvent} e - Drag event
+         */
+        handleBlankAreaDragOver(e) {
+            if (!draggingFolder) return;
+            
+            // Check if we're over the blank area (not over a tree item)
+            const treeItem = e.target.closest('.tree-item');
+            if (treeItem) return; // Not blank area
+            
+            // Validate if dropping to root is allowed
+            if (this.isValidDropTarget(draggingFolder, '')) {
+                e.preventDefault(); // Allow drop
+                e.dataTransfer.dropEffect = 'move';
+                
+                // Add visual feedback to scroll area
+                const scrollArea = document.querySelector('.folders-scroll-area');
+                if (scrollArea && !scrollArea.classList.contains('drop-zone-active')) {
+                    scrollArea.classList.add('drop-zone-active');
+                }
+            }
+        },
+        
+        /**
+         * Handle drag leave event on blank area
+         * @param {DragEvent} e - Drag event
+         */
+        handleBlankAreaDragLeave(e) {
+            // Only remove if we're truly leaving the scroll area
+            const scrollArea = document.querySelector('.folders-scroll-area');
+            if (scrollArea && !scrollArea.contains(e.relatedTarget)) {
+                scrollArea.classList.remove('drop-zone-active');
+            }
+        },
+        
+        /**
+         * Handle drop event on blank area (move to root)
+         * @param {DragEvent} e - Drag event
+         */
+        async handleBlankAreaDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (!draggingFolder) return;
+            
+            // Check if we're over the blank area (not over a tree item)
+            const treeItem = e.target.closest('.tree-item');
+            if (treeItem) return; // Not blank area, let normal handler deal with it
+            
+            // Remove visual feedback
+            const scrollArea = document.querySelector('.folders-scroll-area');
+            if (scrollArea) {
+                scrollArea.classList.remove('drop-zone-active');
+            }
+            
+            const targetPath = ''; // Root directory
+            
+            // Validate drop target
+            if (!this.isValidDropTarget(draggingFolder, targetPath)) {
+                return;
+            }
+            
+            try {
+                // Execute the move via API
+                const result = await API.moveFolder(draggingFolder, targetPath);
+                
+                if (result.error) {
+                    UIUtils.showStatus(result.error, 'error');
+                    return;
+                }
+                
+                // Success - update UI
+                UIUtils.showStatus('Folder moved to root successfully', 'success');
+                
+                // Clear file list since files from old location are no longer valid
+                State.currentFiles = [];
+                State.currentFile = null;
+                State.selectedListItem = null;
+                const fileList = document.getElementById('file-list');
+                if (fileList) {
+                    fileList.innerHTML = '';
+                }
+                
+                // Clear file count display
+                const fileCount = document.getElementById('file-count');
+                if (fileCount) {
+                    fileCount.textContent = '(0)';
+                }
+                
+                // Clear current tree data and expanded folders to force full refresh
+                State.treeData = { '': [] };
+                State.expandedFolders.clear();
+                
+                // Reload from server
+                await this.loadTree();
+                
+            } catch (error) {
+                console.error('Drop operation failed:', error);
+                console.error('Source path:', draggingFolder);
+                console.error('Target path:', targetPath);
+                UIUtils.showStatus('Error moving folder', 'error');
+            }
+        },
+        
+        /**
+         * Handle drag enter event
+         * @param {DragEvent} e - Drag event
+         */
+        handleDragEnter(e) {
+            if (!draggingFolder) return;
+            
+            const treeItem = e.target.closest('.tree-item');
+            if (!treeItem) return;
+            
+            const targetPath = treeItem.dataset.path;
+            
+            // Add visual feedback if valid drop target
+            if (this.isValidDropTarget(draggingFolder, targetPath)) {
+                treeItem.classList.add('drag-over');
+            }
+        },
+        
+        /**
+         * Handle drag leave event
+         * @param {DragEvent} e - Drag event
+         */
+        handleDragLeave(e) {
+            const treeItem = e.target.closest('.tree-item');
+            if (!treeItem) return;
+            
+            // Only remove class if we're actually leaving the element
+            // Check if the related target is not a child of this tree item
+            if (!treeItem.contains(e.relatedTarget)) {
+                treeItem.classList.remove('drag-over');
+            }
+        },
+        
+        /**
+         * Handle drop event
+         * @param {DragEvent} e - Drag event
+         */
+        async handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (!draggingFolder) return;
+            
+            const treeItem = e.target.closest('.tree-item');
+            if (!treeItem) return;
+            
+            const targetPath = treeItem.dataset.path;
+            
+            // Validate drop target
+            if (!this.isValidDropTarget(draggingFolder, targetPath)) {
+                return;
+            }
+            
+            // Remove visual feedback
+            treeItem.classList.remove('drag-over');
+            
+            try {
+                // Execute the move via API
+                const result = await API.moveFolder(draggingFolder, targetPath);
+                
+                if (result.error) {
+                    UIUtils.showStatus(result.error, 'error');
+                    return;
+                }
+                
+                // Success - update UI
+                UIUtils.showStatus('Folder moved successfully', 'success');
+                
+                // Clear file list since files from old location are no longer valid
+                State.currentFiles = [];
+                State.currentFile = null;
+                State.selectedListItem = null;
+                const fileList = document.getElementById('file-list');
+                if (fileList) {
+                    fileList.innerHTML = '';
+                }
+                
+                // Clear file count display
+                const fileCount = document.getElementById('file-count');
+                if (fileCount) {
+                    fileCount.textContent = '(0)';
+                }
+                
+                // Clear current tree data and expanded folders to force full refresh
+                State.treeData = { '': [] };
+                State.expandedFolders.clear();
+                
+                // Reload from server
+                await this.loadTree();
+                
+            } catch (error) {
+                console.error('Drop operation failed:', error);
+                console.error('Source path:', draggingFolder);
+                console.error('Target path:', targetPath);
+                UIUtils.showStatus('Error moving folder', 'error');
+            }
+        },
+        
+        /**
+         * Handle drag end event
+         * @param {DragEvent} e - Drag event
+         */
+        handleDragEnd(e) {
+            // Clean up all drag-related classes
+            document.querySelectorAll('.tree-item.dragging').forEach(item => {
+                item.classList.remove('dragging');
+            });
+            document.querySelectorAll('.tree-item.drag-over').forEach(item => {
+                item.classList.remove('drag-over');
+            });
+            
+            // Remove blank area visual feedback
+            const scrollArea = document.querySelector('.folders-scroll-area');
+            if (scrollArea) {
+                scrollArea.classList.remove('drop-zone-active');
+            }
+            
+            // Reset drag state
+            draggingFolder = null;
+        },
+        
+        /**
+         * Validate if a folder can be dropped on a target
+         * @param {string} sourcePath - Path of folder being dragged
+         * @param {string} targetPath - Path of potential drop target (empty string for root)
+         * @returns {boolean} True if drop is valid
+         */
+        isValidDropTarget(sourcePath, targetPath) {
+            // Cannot drop on itself
+            if (sourcePath === targetPath) {
+                return false;
+            }
+            
+            // Cannot drop on a descendant (would create circular reference)
+            if (targetPath && targetPath.startsWith(sourcePath + '/')) {
+                return false;
+            }
+            
+            // Handle dropping to root (empty string)
+            if (targetPath === '' || targetPath === null || targetPath === undefined) {
+                // Check if source is already at root level (no parent folder)
+                // A folder is at root if it has no '/' in its path
+                const isAlreadyAtRoot = sourcePath.indexOf('/') === -1;
+                // Only allow drop to root if folder is NOT already at root (prevent no-op)
+                return !isAlreadyAtRoot;
+            }
+            
+            // Cannot drop on current parent (would be a no-op move)
+            const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
+            if (sourceParent === targetPath) {
+                return false;
+            }
+            
+            return true;
         },
         
         /**
@@ -682,6 +1045,30 @@
         },
         
         /**
+         * Trigger folder move for currently selected folder (called from keyboard shortcut)
+         */
+        triggerFolderMove() {
+            if (!State.selectedTreeItem) {
+                return;
+            }
+            
+            const folderPath = State.selectedTreeItem.dataset.path;
+            if (!folderPath) {
+                return;
+            }
+            
+            // Get folder name from the tree item
+            const nameSpan = State.selectedTreeItem.querySelector('.tree-item-content span:last-child');
+            const folderName = nameSpan ? nameSpan.textContent : folderPath.split('/').pop();
+            
+            // Start the move operation
+            this.startFolderMove({
+                path: folderPath,
+                name: folderName
+            });
+        },
+        
+        /**
          * Update all folder references after rename
          * @param {string} oldPath - Original folder path
          * @param {string} newPath - New folder path
@@ -755,6 +1142,387 @@
                 const currentPath = element.dataset.path;
                 element.dataset.path = newPath + currentPath.substring(oldPath.length);
             });
+        },
+        
+        /**
+         * Start folder move operation - show modal to select destination
+         * @param {Object} folderItem - The folder data object to move
+         */
+        startFolderMove(folderItem) {
+            // Store the source folder
+            State.movingFolder = {
+                path: folderItem.path,
+                name: folderItem.name
+            };
+            
+            // Show the move folder modal
+            const modal = document.getElementById('move-folder-modal');
+            const overlay = document.getElementById('move-folder-overlay');
+            const sourceName = document.getElementById('move-folder-source-name');
+            const treeContainer = document.getElementById('move-folder-tree');
+            
+            if (!modal || !overlay || !sourceName || !treeContainer) {
+                console.error('Move folder modal elements not found');
+                return;
+            }
+            
+            // Set source folder name
+            sourceName.textContent = folderItem.name;
+            
+            // Build the folder tree (excluding source folder and its descendants)
+            this.buildMoveFolderTree(treeContainer, folderItem.path);
+            
+            // Show modal
+            overlay.classList.add('active');
+            modal.classList.add('active');
+            
+            // Set up keyboard handlers for the modal
+            const handleModalKeydown = (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.closeFolderMoveModal();
+                    document.removeEventListener('keydown', handleModalKeydown);
+                } else if (e.key === 'Enter') {
+                    const confirmBtn = document.getElementById('move-folder-confirm-btn');
+                    if (confirmBtn && !confirmBtn.disabled) {
+                        e.preventDefault();
+                        this.executeFolderMove();
+                        document.removeEventListener('keydown', handleModalKeydown);
+                    }
+                }
+            };
+            
+            // Add event listener
+            document.addEventListener('keydown', handleModalKeydown);
+            
+            // Store handler for cleanup
+            State.modalKeydownHandler = handleModalKeydown;
+            
+            // Add overlay click handler
+            const handleOverlayClick = (e) => {
+                if (e.target === overlay) {
+                    this.closeFolderMoveModal();
+                    overlay.removeEventListener('click', handleOverlayClick);
+                }
+            };
+            overlay.addEventListener('click', handleOverlayClick);
+            State.modalOverlayHandler = handleOverlayClick;
+        },
+        
+        /**
+         * Build a folder tree for the move modal
+         * @param {HTMLElement} container - Container for the tree
+         * @param {string} excludePath - Path to exclude (source folder)
+         */
+        buildMoveFolderTree(container, excludePath) {
+            container.innerHTML = '';
+            
+            // Add root option
+            const rootItem = this.createMoveFolderItem({
+                name: '/ (Root)',
+                path: '',
+                type: 'folder'
+            }, excludePath, 0);
+            container.appendChild(rootItem);
+            
+            // Build tree from data
+            const items = State.treeData[''] || [];
+            this.buildMoveFolderTreeRecursive(container, items, excludePath, 0);
+        },
+        
+        /**
+         * Recursively build folder tree for move modal
+         * @param {HTMLElement} container - Container element
+         * @param {Array} items - Items to render
+         * @param {string} excludePath - Path to exclude
+         * @param {number} level - Depth level
+         */
+        buildMoveFolderTreeRecursive(container, items, excludePath, level) {
+            items.forEach(item => {
+                if (item.type !== 'folder') return;
+                
+                // Skip the source folder and its descendants
+                if (item.path === excludePath || item.path.startsWith(excludePath + '/')) {
+                    return;
+                }
+                
+                const folderItem = this.createMoveFolderItem(item, excludePath, level);
+                container.appendChild(folderItem);
+                
+                // If this folder has children and is expanded, show them
+                if (State.treeData[item.path]) {
+                    this.buildMoveFolderTreeRecursive(container, State.treeData[item.path], excludePath, level + 1);
+                }
+            });
+        },
+        
+        /**
+         * Create a folder item for the move modal
+         * @param {Object} item - Folder item data
+         * @param {string} excludePath - Path to exclude
+         * @param {number} level - Depth level
+         * @returns {HTMLElement} Folder item element
+         */
+        createMoveFolderItem(item, excludePath, level) {
+            const div = document.createElement('div');
+            div.className = 'move-folder-item';
+            div.dataset.path = item.path;
+            div.style.paddingLeft = `${level * 1.5 + 0.75}rem`;
+            
+            const icon = document.createElement('span');
+            icon.className = 'move-folder-icon';
+            icon.textContent = '📁';
+            
+            const name = document.createElement('span');
+            name.textContent = item.name;
+            
+            div.appendChild(icon);
+            div.appendChild(name);
+            
+            // Click handler to select this folder as destination
+            div.onclick = () => {
+                // Remove previous selection
+                document.querySelectorAll('.move-folder-item.selected').forEach(el => {
+                    el.classList.remove('selected');
+                });
+                // Select this folder
+                div.classList.add('selected');
+                
+                // Enable the move button
+                const moveBtn = document.getElementById('move-folder-confirm-btn');
+                if (moveBtn) {
+                    moveBtn.disabled = false;
+                }
+            };
+            
+            return div;
+        },
+        
+        /**
+         * Execute the folder move operation
+         */
+        async executeFolderMove() {
+            const selectedItem = document.querySelector('.move-folder-item.selected');
+            if (!selectedItem || !State.movingFolder) {
+                return;
+            }
+            
+            const destinationPath = selectedItem.dataset.path;
+            const sourcePath = State.movingFolder.path;
+            
+            // Prevent moving a folder into itself or its descendants
+            if (destinationPath.startsWith(sourcePath + '/') || destinationPath === sourcePath) {
+                UIUtils.showStatus('Cannot move folder into itself', 'error');
+                return;
+            }
+            
+            const confirmBtn = document.getElementById('move-folder-confirm-btn');
+            const ButtonStatus = window.MetadataRemote.UI.ButtonStatus;
+            
+            try {
+                // Show processing state
+                if (ButtonStatus) {
+                    ButtonStatus.showButtonStatus(confirmBtn, 'Moving...', 'processing');
+                }
+                
+                const result = await API.moveFolder(sourcePath, destinationPath);
+                
+                if (result.error) {
+                    if (ButtonStatus) {
+                        ButtonStatus.showButtonStatus(confirmBtn, result.error, 'error', 3000);
+                    }
+                    UIUtils.showStatus(result.error, 'error');
+                    return;
+                }
+                
+                // Success!
+                if (ButtonStatus) {
+                    ButtonStatus.showButtonStatus(confirmBtn, 'Moved!', 'success', 1500);
+                }
+                UIUtils.showStatus('Folder moved successfully', 'success');
+                
+                // Clear file list since files from old location are no longer valid
+                State.currentFiles = [];
+                State.currentFile = null;
+                State.selectedListItem = null;
+                const fileList = document.getElementById('file-list');
+                if (fileList) {
+                    fileList.innerHTML = '';
+                }
+                
+                // Clear file count display
+                const fileCount = document.getElementById('file-count');
+                if (fileCount) {
+                    fileCount.textContent = '(0)';
+                }
+                
+                // Clear current tree data and expanded folders to force full refresh
+                State.treeData = { '': [] };
+                State.expandedFolders.clear();
+                
+                // Reload from server
+                await this.loadTree();
+                
+                // Close modal after brief delay
+                setTimeout(() => {
+                    this.closeFolderMoveModal();
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Error moving folder:', error);
+                console.error('Source path:', sourcePath);
+                console.error('Destination path:', destinationPath);
+                if (ButtonStatus) {
+                    ButtonStatus.showButtonStatus(confirmBtn, 'Network error', 'error', 3000);
+                }
+                UIUtils.showStatus('Error moving folder', 'error');
+            }
+        },
+        
+        /**
+         * Close the folder move modal
+         */
+        closeFolderMoveModal() {
+            const modal = document.getElementById('move-folder-modal');
+            const overlay = document.getElementById('move-folder-overlay');
+            
+            if (modal && overlay) {
+                overlay.classList.remove('active');
+                modal.classList.remove('active');
+            }
+            
+            // Clean up event listeners
+            if (State.modalKeydownHandler) {
+                document.removeEventListener('keydown', State.modalKeydownHandler);
+                State.modalKeydownHandler = null;
+            }
+            if (State.modalOverlayHandler) {
+                overlay.removeEventListener('click', State.modalOverlayHandler);
+                State.modalOverlayHandler = null;
+            }
+            
+            // Clear state
+            State.movingFolder = null;
+            
+            // Reset button
+            const confirmBtn = document.getElementById('move-folder-confirm-btn');
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+            }
+        },
+        
+        /**
+         * Show dialog to create a new folder
+         */
+        showCreateFolderDialog() {
+            // Get parent path (currently selected folder, or root if none selected)
+            const parentPath = State.currentPath || '';
+            const parentName = parentPath ? parentPath.split('/').pop() : 'Root';
+            
+            // Prompt for folder name with clear indication of parent
+            const folderName = prompt(`Create new folder in "${parentName}":\n\nEnter folder name:`);
+            if (!folderName || folderName.trim() === '') return;
+            
+            // Call API to create folder
+            this.createFolder(parentPath, folderName.trim());
+        },
+        
+        /**
+         * Create a new folder
+         * @param {string} parentPath - Parent directory path
+         * @param {string} folderName - Name of new folder
+         */
+        async createFolder(parentPath, folderName) {
+            try {
+                const result = await API.createFolder(parentPath, folderName);
+                
+                if (result.error) {
+                    UIUtils.showStatus(result.error, 'error');
+                    return;
+                }
+                
+                // Success - reload tree
+                State.treeData = { '': [] };
+                State.expandedFolders.clear();
+                await this.loadTree();
+                
+                UIUtils.showStatus('Folder created successfully', 'success');
+            } catch (error) {
+                console.error('Create folder failed:', error);
+                UIUtils.showStatus('Failed to create folder', 'error');
+            }
+        },
+        
+        /**
+         * Show confirmation dialog to delete selected folder
+         */
+        showDeleteFolderDialog() {
+            // Check if a folder is selected
+            if (!State.selectedTreeItem) {
+                UIUtils.showStatus('Please select a folder to delete', 'warning');
+                return;
+            }
+            
+            const folderPath = State.selectedTreeItem.dataset.path;
+            const folderName = folderPath.split('/').pop() || folderPath;
+            
+            // Confirm deletion
+            if (!confirm(`Delete folder "${folderName}"?\n\nThis will delete the folder and all its contents.`)) {
+                return;
+            }
+            
+            this.deleteFolder(folderPath);
+        },
+        
+        /**
+         * Delete a folder
+         * @param {string} folderPath - Path of folder to delete
+         */
+        async deleteFolder(folderPath) {
+            try {
+                // Try without force first
+                let result = await API.deleteFolder(folderPath, false);
+                
+                // If folder not empty, ask for confirmation to force delete
+                if (result.error && result.error.includes('not empty')) {
+                    const message = result.error + '\n\nDelete anyway?';
+                    if (!confirm(message)) return;
+                    
+                    result = await API.deleteFolder(folderPath, true);
+                }
+                
+                if (result.error) {
+                    UIUtils.showStatus(result.error, 'error');
+                    return;
+                }
+                
+                // Success - clear selection and reload tree
+                State.selectedTreeItem = null;
+                State.currentPath = '';
+                State.currentFile = null;
+                State.currentFiles = [];
+                State.treeData = { '': [] };
+                State.expandedFolders.clear();
+                
+                // Clear file list UI
+                const fileList = document.getElementById('file-list');
+                if (fileList) {
+                    fileList.innerHTML = '';
+                }
+                
+                // Clear file count display
+                const fileCount = document.getElementById('file-count');
+                if (fileCount) {
+                    fileCount.textContent = '(0)';
+                }
+                
+                await this.loadTree();
+                
+                UIUtils.showStatus('Folder deleted successfully', 'success');
+            } catch (error) {
+                console.error('Delete folder failed:', error);
+                UIUtils.showStatus('Failed to delete folder', 'error');
+            }
         }
     };
 })();

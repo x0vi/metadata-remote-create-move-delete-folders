@@ -36,6 +36,7 @@ import uuid
 from dataclasses import dataclass, asdict
 from enum import Enum
 import subprocess
+import shutil
 from werkzeug.middleware.proxy_fix import ProxyFix
 import signal
 import sys
@@ -486,6 +487,283 @@ def rename_folder():
             return jsonify({'error': f'System error: {str(e)}'}), 500
     except Exception as e:
         logger.error(f"Error renaming folder: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/move-folder', methods=['POST'])
+def move_folder():
+    """Move a folder to a different location within the music directory"""
+    try:
+        data = request.json
+        source_rel_path = data.get('sourcePath')
+        dest_rel_path = data.get('destinationPath')
+        
+        # Validate required parameters
+        # Note: dest_rel_path can be '' (empty string) for root directory
+        if not source_rel_path or dest_rel_path is None:
+            return jsonify({'error': 'Missing required parameters'}), 400
+        
+        # Validate and construct absolute paths
+        source_path = validate_path(os.path.join(MUSIC_DIR, source_rel_path))
+        dest_parent_path = validate_path(os.path.join(MUSIC_DIR, dest_rel_path))
+        
+        # Check that source folder exists
+        if not os.path.exists(source_path):
+            return jsonify({'error': 'Source folder not found'}), 404
+        
+        if not os.path.isdir(source_path):
+            return jsonify({'error': 'Source path is not a folder'}), 400
+        
+        # Check that destination parent exists
+        if not os.path.exists(dest_parent_path):
+            return jsonify({'error': 'Destination folder not found'}), 404
+        
+        if not os.path.isdir(dest_parent_path):
+            return jsonify({'error': 'Destination path is not a folder'}), 400
+        
+        # Get the folder name to move
+        folder_name = os.path.basename(source_path)
+        dest_path = os.path.join(dest_parent_path, folder_name)
+        
+        # Prevent moving a folder into itself or its own subdirectories
+        try:
+            # Normalize paths to resolve any '..' or '.' components
+            norm_source = os.path.normpath(os.path.abspath(source_path))
+            norm_dest = os.path.normpath(os.path.abspath(dest_path))
+            norm_dest_parent = os.path.normpath(os.path.abspath(dest_parent_path))
+            
+            # Check if destination is the same as source
+            if norm_source == norm_dest:
+                return jsonify({'error': 'Source and destination are the same'}), 400
+            
+            # Check if trying to move folder into itself or its subdirectory
+            if norm_dest_parent.startswith(norm_source + os.sep) or norm_dest_parent == norm_source:
+                return jsonify({'error': 'Cannot move folder into itself or its subdirectories'}), 400
+        except Exception as e:
+            logger.error(f"Error validating paths: {e}")
+            return jsonify({'error': 'Invalid path configuration'}), 400
+        
+        # Check if destination already contains a folder with the same name
+        if os.path.exists(dest_path):
+            return jsonify({'error': 'A folder with this name already exists in the destination'}), 400
+        
+        # Get all audio files in the folder recursively before moving
+        old_files = []
+        for root, dirs, files in os.walk(source_path):
+            for file in files:
+                if file.lower().endswith(AUDIO_EXTENSIONS):
+                    old_files.append(os.path.join(root, file))
+        
+        logger.info(f"Moving folder from {source_path} to {dest_path}")
+        
+        # Move the folder
+        try:
+            shutil.move(source_path, dest_path)
+        except PermissionError:
+            return jsonify({'error': 'Permission denied'}), 403
+        except OSError as e:
+            if e.errno == 28:  # No space left
+                return jsonify({'error': 'Insufficient space'}), 507
+            else:
+                logger.error(f"OS error moving folder: {e}")
+                return jsonify({'error': f'System error: {str(e)}'}), 500
+        
+        # Fix ownership of the moved folder
+        fix_file_ownership(dest_path)
+        
+        # Update history references for all files in the moved folder
+        for old_file_path in old_files:
+            # Calculate new file path
+            rel_path = os.path.relpath(old_file_path, source_path)
+            new_file_path = os.path.join(dest_path, rel_path)
+            history.update_file_references(old_file_path, new_file_path)
+        
+        # Return new relative path
+        new_rel_path = os.path.relpath(dest_path, MUSIC_DIR)
+        logger.info(f"Folder moved successfully to {new_rel_path}")
+        
+        return jsonify({'status': 'success', 'newPath': new_rel_path})
+        
+    except ValueError as e:
+        logger.error(f"Path validation error: {e}")
+        return jsonify({'error': 'Invalid path'}), 403
+    except Exception as e:
+        logger.error(f"Error moving folder: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/create-folder', methods=['POST'])
+def create_folder():
+    """Create a new folder within the music directory"""
+    try:
+        data = request.json
+        parent_path = data.get('parentPath', '')
+        folder_name = data.get('folderName', '')
+        
+        # Validate inputs
+        if not folder_name:
+            return jsonify({'error': 'Folder name is required'}), 400
+        
+        # Validate folder name - no path separators
+        if '/' in folder_name or '\\' in folder_name:
+            return jsonify({'error': 'Folder name cannot contain path separators'}), 400
+        
+        # Additional validation for special characters
+        invalid_chars = '<>:"|?*'
+        if any(char in folder_name for char in invalid_chars):
+            return jsonify({'error': 'Folder name contains invalid characters'}), 400
+        
+        # Check length
+        if len(folder_name) > 255:
+            return jsonify({'error': 'Folder name too long'}), 400
+        
+        # Check reserved names (Windows compatibility)
+        reserved_names = ['CON', 'PRN', 'AUX', 'NUL'] + \
+                        [f'COM{i}' for i in range(1, 10)] + \
+                        [f'LPT{i}' for i in range(1, 10)]
+        if folder_name.upper() in reserved_names:
+            return jsonify({'error': 'Reserved folder name'}), 400
+        
+        # Prevent hidden folders (starting with .)
+        if folder_name.startswith('.'):
+            return jsonify({'error': 'Folder name cannot start with a dot'}), 400
+        
+        # Build full path
+        parent_abs_path = validate_path(os.path.join(MUSIC_DIR, parent_path))
+        new_folder_path = os.path.join(parent_abs_path, folder_name)
+        
+        # Validate the new folder path is within MUSIC_DIR
+        new_folder_path = validate_path(new_folder_path)
+        
+        # Check if parent exists
+        if not os.path.exists(parent_abs_path):
+            return jsonify({'error': 'Parent folder not found'}), 404
+        
+        if not os.path.isdir(parent_abs_path):
+            return jsonify({'error': 'Parent path is not a folder'}), 400
+        
+        # Check if folder already exists
+        if os.path.exists(new_folder_path):
+            return jsonify({'error': 'Folder already exists'}), 400
+        
+        # Create the folder
+        try:
+            os.makedirs(new_folder_path, exist_ok=False)
+        except FileExistsError:
+            return jsonify({'error': 'Folder already exists'}), 400
+        except PermissionError:
+            return jsonify({'error': 'Permission denied'}), 403
+        except OSError as e:
+            if e.errno == 28:  # No space left
+                return jsonify({'error': 'Insufficient space'}), 507
+            else:
+                logger.error(f"OS error creating folder: {e}")
+                return jsonify({'error': f'System error: {str(e)}'}), 500
+        
+        # Fix ownership
+        fix_file_ownership(new_folder_path)
+        
+        # Return new relative path
+        new_rel_path = os.path.relpath(new_folder_path, MUSIC_DIR)
+        logger.info(f"Folder created successfully: {new_rel_path}")
+        
+        return jsonify({
+            'status': 'success',
+            'path': new_rel_path
+        })
+        
+    except ValueError as e:
+        logger.error(f"Path validation error: {e}")
+        return jsonify({'error': 'Invalid path'}), 403
+    except Exception as e:
+        logger.error(f"Error creating folder: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/delete-folder', methods=['POST'])
+def delete_folder():
+    """Delete a folder from the music directory"""
+    try:
+        data = request.json
+        folder_path = data.get('folderPath', '')
+        force = data.get('force', False)
+        
+        # Validate path
+        if not folder_path:
+            return jsonify({'error': 'Folder path is required'}), 400
+        
+        abs_folder_path = validate_path(os.path.join(MUSIC_DIR, folder_path))
+        
+        # Check if folder exists
+        if not os.path.exists(abs_folder_path):
+            return jsonify({'error': 'Folder not found'}), 404
+        
+        if not os.path.isdir(abs_folder_path):
+            return jsonify({'error': 'Path is not a folder'}), 400
+        
+        # Prevent deletion of the root music directory
+        if os.path.abspath(abs_folder_path) == os.path.abspath(MUSIC_DIR):
+            return jsonify({'error': 'Cannot delete the root music directory'}), 403
+        
+        # Check if folder is empty
+        try:
+            folder_contents = os.listdir(abs_folder_path)
+            is_empty = len(folder_contents) == 0
+        except PermissionError:
+            return jsonify({'error': 'Permission denied'}), 403
+        
+        # If not empty and force not specified, return error with details
+        if not is_empty and not force:
+            # Count files and subdirectories
+            file_count = 0
+            dir_count = 0
+            for item in folder_contents:
+                item_path = os.path.join(abs_folder_path, item)
+                if os.path.isfile(item_path):
+                    file_count += 1
+                elif os.path.isdir(item_path):
+                    dir_count += 1
+            
+            return jsonify({
+                'error': 'Folder is not empty',
+                'isEmpty': False,
+                'fileCount': file_count,
+                'dirCount': dir_count,
+                'requiresForce': True
+            }), 400
+        
+        # Collect all audio files before deletion for history cleanup
+        deleted_files = []
+        if not is_empty:
+            for root, dirs, files in os.walk(abs_folder_path):
+                for file in files:
+                    if file.lower().endswith(AUDIO_EXTENSIONS):
+                        deleted_files.append(os.path.join(root, file))
+        
+        # Delete the folder
+        try:
+            if is_empty:
+                os.rmdir(abs_folder_path)
+            else:
+                shutil.rmtree(abs_folder_path)
+            
+            logger.info(f"Folder deleted successfully: {folder_path}")
+        except PermissionError:
+            return jsonify({'error': 'Permission denied'}), 403
+        except OSError as e:
+            logger.error(f"OS error deleting folder: {e}")
+            return jsonify({'error': f'System error: {str(e)}'}), 500
+        
+        # Note: History entries for deleted files will remain but operations on them will fail gracefully
+        # This is acceptable as the files no longer exist
+        
+        return jsonify({
+            'status': 'success',
+            'filesDeleted': len(deleted_files)
+        })
+        
+    except ValueError as e:
+        logger.error(f"Path validation error: {e}")
+        return jsonify({'error': 'Invalid path'}), 403
+    except Exception as e:
+        logger.error(f"Error deleting folder: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/metadata/<path:filename>')

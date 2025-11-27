@@ -47,6 +47,7 @@ Multi-architecture Docker images available for x86_64, ARM64, and ARMv7.
 ### Powerful File Management
 - **In-browser playback** - Stream files directly in the UI
 - **Direct editing** - Rename files and folders without leaving the interface
+- **Move folders** - Relocate entire folders to different locations with Ctrl+Shift+M
 - **Format support** - MP3, FLAC, OGG, OPUS, M4A, M4B, WMA, WAV, and WavPack
 - **Album art control** - Upload, preview, delete, and bulk apply artwork with automatic corruption repair
 - **Editing history** - Full undo/redo for up to 1000 operations, including bulk changes
@@ -89,6 +90,7 @@ Real-time search filtering • Resizable workspace panels • History tracking t
 - **Enter** Expand folders / Play files / Edit fields
 - **Esc** Cancel edits / Close dialogs
 - **Double Enter** Rename folders
+- **Ctrl+Shift+M** Move folder to different location
 - **Shift+Delete** Delete metadata fields
 - **Alt+T** Toggle theme
 - **?** Show help
@@ -121,6 +123,12 @@ When you click on an empty metadata field, Metadata Remote will:
 - **Apply to Folder**: Apply any field value to all files in the folder
 - **Album Art**: Upload once, apply to entire album folders
 - **Smart workflow**: Navigate → Edit → Apply to folder
+
+### Folder Operations
+- **Move Folders**: Select a folder and press Ctrl+Shift+M to move it to a different location
+- **Choose destination**: Select the target parent folder from the modal dialog
+- **Preserves history**: All file edit history is maintained after moving folders
+- **Safe operation**: Prevents moving folders into themselves or conflicting locations
 
 ### Album Art Management
 - **Upload**: Click "Upload Image" to add new art

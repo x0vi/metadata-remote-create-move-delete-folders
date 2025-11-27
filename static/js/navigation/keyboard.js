@@ -582,6 +582,23 @@
                 { priority: 80 }  // Higher priority to ensure it's checked before other handlers
             );
             
+            // CTRL+SHIFT+M for folder move
+            Router.register(
+                {
+                    key: 'M',
+                    state: '*',
+                    modifiers: { ctrl: true, shift: true },
+                    context: { pane: 'folders' }
+                },
+                (event) => {
+                    event.preventDefault();
+                    if (window.MetadataRemote.Navigation.Tree) {
+                        window.MetadataRemote.Navigation.Tree.triggerFolderMove();
+                    }
+                },
+                { priority: 80 }
+            );
+            
             // Tab key routing
             const tabState = window.NavigationStates?.NORMAL || 'normal';
             // Tab routing handled by PaneNavigation module

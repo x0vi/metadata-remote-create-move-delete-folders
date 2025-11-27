@@ -82,6 +82,51 @@ window.MetadataRemote.API = {
         });
     },
     
+    async moveFolder(sourcePath, destinationPath) {
+        return this.call('/move-folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                sourcePath: sourcePath,
+                destinationPath: destinationPath
+            })
+        });
+    },
+    /**
+     * Create a new folder
+     * @param {string} parentPath - Parent directory path (empty string for root)
+     * @param {string} folderName - Name of the new folder
+     * @returns {Promise<Object>} Response with status and new folder path
+     */
+    async createFolder(parentPath, folderName) {
+        return this.call('/create-folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                parentPath: parentPath,
+                folderName: folderName
+            })
+        });
+    },
+    
+    /**
+     * Delete a folder
+     * @param {string} folderPath - Path of folder to delete
+     * @param {boolean} force - Whether to force delete non-empty folders (default: false)
+     * @returns {Promise<Object>} Response with status or error details
+     */
+    async deleteFolder(folderPath, force = false) {
+        return this.call('/delete-folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                folderPath: folderPath,
+                force: force
+            })
+        });
+    },
+    
+    
     // Metadata operations
     async getMetadata(filepath) {
         return this.call(`/metadata/${encodeURIComponent(filepath)}`);
