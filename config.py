@@ -28,7 +28,7 @@ OWNER_GID = int(os.environ.get('PGID', '1000'))
 
 # Server configuration
 PORT = 8338
-HOST = '0.0.0.0'
+HOST = os.environ.get('HOST', '::')
 
 # Supported audio formats
 AUDIO_EXTENSIONS = (
